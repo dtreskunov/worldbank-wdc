@@ -1,40 +1,49 @@
 (ns worldbank-wdc.core
+  (:require-macros [cljs.core.async.macros :as async])
   (:require [reagent.core :as reagent :refer [atom]]
-            [ajax.core :refer [GET json-response-format]]
+            [cljs-http.client :as http]
+            [cljs.core.async :as async]
             [worldbank-wdc.wdc :as wdc]))
 
 (enable-console-print!)
 
-(defn get-schema [wdc-callback]
-  (let [cols [{:id "mag"   :alias "magnitude" :dataType (.. js/tableau -dataTypeEnum -float)}
-              {:id "title" :alias "title"     :dataType (.. js/tableau -dataTypeEnum -string)}
-              {:id "url"   :alias "url"       :dataType (.. js/tableau -dataTypeEnum -float)}
-              {:id "lat"   :alias "latitude"  :dataType (.. js/tableau -dataTypeEnum -float) :columnRole "dimension"}
-              {:id "lon"   :alias "longitude" :dataType (.. js/tableau -dataTypeEnum -float) :columnRole "dimension"}]
-        table-info {:id      "earthquakeFeed"
-                    :alias   "Earthquakes with magnitude greater than 4.5 in the last seven days"
-                    :columns cols}]
-    (wdc-callback (clj->js [table-info]))))
+(defn get-schema []
+  [{::wdc/id      "earthquakeFeed"
+    ::wdc/alias   "Earthquakes with magnitude greater than 4.5 in the last seven days"
+    ::wdc/columns [{::wdc/id       "id"
+                    ::wdc/dataType "string"}
+                   {::wdc/id       "mag"
+                    ::wdc/alias    "magnitude"
+                    ::wdc/dataType "float"}
+                   {::wdc/id       "title"
+                    ::wdc/dataType "string"}
+                   {::wdc/id       "lat"
+                    ::wdc/dataType "float"}
+                   {::wdc/id       "lon"
+                    ::wdc/dataType "float"}]}])
 
-(defn get-data [table wdc-callback]
-  (defn on-success [response]
-    (let [rows (map (fn [feat]
-                      {"id" (feat "id")
-                       "mag" (get-in feat ["properties" "mag"])
-                       "title" (get-in feat ["properties" "title"])
-                       "lon" (first (get-in feat ["geometry" "coordinates"]))
-                       "lat" (second (get-in feat ["geometry" "coordinates"]))})
-                    (response "features"))]
-      (.appendRows table (clj->js rows))
-      (wdc-callback)))
-  (GET "http://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson"
-       {:response-format :json
-        :handler on-success}))
+(defn get-rows-chan [table-info]
+  (let [rows-chan (async/chan 1)
+        response-chan (http/get "http://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson"
+                                {:keywordize-keys?  false   ; only works for http/jsonp -- https://github.com/r0man/cljs-http/issues/79
+                                 :with-credentials? false})
+        response->rows (fn [response]
+                         (->> response
+                              :body
+                              :features
+                              (map (fn [feat]
+                                     {:id    (feat :id)
+                                      :mag   (get-in feat [:properties :mag])
+                                      :title (get-in feat [:properties :title])
+                                      :lon   (first (get-in feat [:geometry :coordinates]))
+                                      :lat   (second (get-in feat [:geometry :coordinates]))}))))]
+    (async/go
+      (->> (async/<! response-chan)
+           (response->rows)
+           (async/>! rows-chan)))
+    rows-chan))
 
-(wdc/register-connector!
-  (wdc/make-connector get-schema get-data))
-
-(wdc/set-connection-name! "Earthquake Feed")
+(wdc/register! get-schema get-rows-chan "Earthquake Feed")
 
 (defn submit! []
   (wdc/submit!))
@@ -43,7 +52,7 @@
   [:div.container.container-table
    [:div.row.vertical-center-row
     [:div.text-center.col-md-4.col-md-offset-4
-     [:input.btn.btn-success {:type "button" :value "Get Earthquake Data!" :on-click submit!}]]]])
+     [:input.btn.btn-success {:type "button" :value "Get Data!" :on-click submit!}]]]])
 
 
 (reagent/render [root-comp] (. js/document (getElementById "root")))

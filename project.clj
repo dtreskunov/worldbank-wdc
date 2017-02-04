@@ -8,10 +8,9 @@
 
   :dependencies [[org.clojure/clojure "1.9.0-alpha14"]
                  [org.clojure/clojurescript "1.9.456"]
-                 [org.clojure/core.async "0.2.395"
-                  :exclusions [org.clojure/tools.reader]]
+                 [org.clojure/core.async "0.2.395" :exclusions [org.clojure/tools.reader]]
                  [reagent "0.6.0"]
-                 [cljs-ajax "0.5.8"]]
+                 [cljs-http "0.1.42"]]
   :jvm-opts ^:replace ["-Xmx1g" "-server"]
 
   :plugins [[lein-figwheel "0.5.9"]
